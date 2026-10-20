@@ -1,0 +1,125 @@
+SoundSight 双核PYNQ：按此前SSCOM方式传文件与运行
+2026-10-20。主入口run_smp.py；运行在同一个Linux/PYNQ的CPU0、CPU1上。
+CPU1的Python调用C共享库并独占MMIO，CPU0负责控制、保存和显示。
+当前公共算法/ABI只支持二维方位及水平轴。双轴库/接口仍等B/A交付，不能据本包称双轴完成。
+
+一、已有说明和本次补充
+此前software/ps/运行说明.txt已经写了编译、BIST、真实采集、STOP/恢复命令。
+本文件补上离线串口逐步传输、完整文件包、目标Python选择和每一步应看到什么。
+系统镜像已由SD启动后执行本流程，不重新刷SD、不向CPU1加载裸机ELF。
+本次只准备文件和PC自测，未打开串口或在板上执行。
+
+二、在电脑取得文件
+项目：https://github.com/TophBeifong1744/SoundSight
+固定交付包：release/output/soundsight-pynq-serial.zip（本批在PR #16分支，尚未合入main）。
+下载ZIP并在电脑解压到任意工作目录，得到：
+  串口部署.txt             本步骤
+  copy_serial_step.ps1     复制指定一条命令，不连接或自动发送串口
+  serial_commands.txt     每行一条可直接发到Linux shell的ASCII命令
+  payload.tar.gz          相同软件内容的压缩包；无需用SSCOM直接发送此二进制
+  CONTENTS.txt            内容清单和B的准确候选
+
+如从源码重建，在新SoundSight仓库根目录执行：
+git fetch origin pull/15/head:refs/remotes/origin/pr/15
+python software/ps/package_serial.py
+默认固定使用B PR #15的61e7303331641ec2353f89088b060aa81ffd6110，不自动下载或合并。
+源码重建需支持--no-lazy-fetch的Git；缺本地对象时明确报错，手工获取后重试。
+输出就是上述固定ZIP。源/脚本均来自本SoundSight，不需要旧Competition_fpga。
+包中包含S1源码、冻结头、C桥、PYNQ客户/双核入口、原S1测试、B的157组对照测试和PC基准。
+不包含ARM.so、Windows DLL、CPU1裸机ELF、实际bit/HWH或旧测试HWH。
+
+三、SSCOM连接与逐步发送
+1. 用原来能登录板上Linux的串口。此前使用115200、8N1；COM号以当前设备管理器为准。
+   SSCOM关闭HEX发送。先按回车，应能看到Linux的$或#提示符。
+   如果是Python的>>>，先exit()返回shell；如果是U-Boot提示符，先让A处理系统启动。
+2. 在电脑解压目录打开PowerShell，查看总步数：
+   powershell -NoProfile -ExecutionPolicy Bypass -File .\copy_serial_step.ps1
+   输出TOTAL_STEPS=N。N由本次包大小决定。
+3. 复制第1步：
+   powershell -NoProfile -ExecutionPolicy Bypass -File .\copy_serial_step.ps1 -Step 1
+   看到COPIED=YES后，在SSCOM普通发送框粘贴，发送一次并带一个回车/LF。
+   等板上Linux提示符返回，再将-Step改为2、3……一直到N。
+   每条命令小于3800字节；不要把整个serial_commands.txt一次粘贴或连续高速发送。
+   无需SSCOM“打开文件”；此前那个按钮只预览文件，并不保证板上已收到。
+4. 第1、2步仅设置ss_stage和ss_dest，第3步创建暂存目录；接着每块显示CHUNK_####_OK。
+   后面拼接解码，校验成功显示PAYLOAD_OK bytes=实际字节数，最后显示UNPACK_OK。
+   单块丢失或不确定是否收到，可重发该块；每块独立覆盖，不会重复追加。
+   若出现未闭合引号的“>”提示符，先发送Ctrl+C回到正常shell，再重发；不要继续拼进旧命令。
+   所有命令都在同一个shell会话执行。重新登录后先重发第1、2步恢复变量。
+5. 任一错误或没有PAYLOAD_OK/UNPACK_OK就先处理，不继续编译。
+   DEST_EXISTS表示目标已有内容，保护旧程序和结果；把ss_dest改为一个新的可写Linux目录，
+   再重发最后的解包步骤。不要删除或覆盖正在运行的程序。
+   默认目标为$HOME/soundsight-pynq；暂存为$HOME/soundsight-serial-inbox。
+   不要在/boot的FAT分区或noexec介质上编译/执行。
+
+四、板上确认环境（只读，不碰PL寄存器）
+解包成功后，在SSCOM的Linux shell逐条运行：
+cd "$ss_dest"
+mkdir -p results
+uname -m
+getconf LONG_BIT
+gcc --version
+gcc -dumpmachine
+cat /sys/devices/system/cpu/online
+cat /proc/cmdline
+
+本板目标Zynq-7020/Cortex-A9；应是ARM Linux，通常armv7l/32位。
+两个Linux核须在线且允许进程使用。若仍有maxcpus=1或CPU1被旧AMP使用，交A修正启动配置。
+本流程不热启CPU、不加载CPU1 ELF、不改变DDR保留或启动参数。
+
+沿用此前成功的PYNQ解释器，先确认路径存在：
+ss_py=/usr/local/share/pynq-venv/bin/python3
+test -x "$ss_py" && "$ss_py" --version
+sudo /usr/bin/env XILINX_XRT=/usr "$ss_py" -c 'import os,sys,struct,pynq; print(sys.executable,sys.version,struct.calcsize("P")*8,pynq.__version__,sorted(os.sched_getaffinity(0))); assert {0,1} <= os.sched_getaffinity(0), "Two Linux CPUs required"'
+
+若解释器路径不存在或import pynq失败，提供完整错误给C，并指定实际能import pynq的Python。
+后面的命令统一用确认后的ss_py，不要让sudo偷偷换到另一个python3。
+目标编译需要已有gcc和libc开发头/libm；本包无需pip或联网安装。缺依赖时先报告，不能用PC DLL顶替。
+保留这些环境输出给A/B/C，可用SSCOM日志保存。
+
+五、先在ARM上编译和离线核对（不要求bit已加载）
+sh software/ps/build_solver.sh
+预期：生成software/ps/libss_solver.so，并打印“ARM求解库生成”。
+如编译失败，保留完整输出，后面不继续。这个.so必须与所选Python位数和ARM Linux ABI匹配。
+
+"$ss_py" software/tests/test_solver_migration.py --library software/ps/libss_solver.so --golden document/evidence/ps-solver-migration-20261020/PC-RESULT.json --output results/ARM-RESULT.json
+预期：MIGRATION_PASS original_s1=4705 equivalence=157 bridge_negative=6。
+这一步只调用C库，不导入PYNQ、不读MMIO、不动作；将完整输出和ARM-RESULT.json返回B/C。
+失败保留第一处差异，不改符号、阈值、舍入或把PC结果改名作ARM结果。
+
+"$ss_py" software/tests/test_smp.py
+预期：Ran 17 tests / OK。这是目标机上的假MMIO进程自测，仍不证明真实PL或机械通过。
+
+六、A准备真实硬件后，再跑双核取数
+仅在A已经加载本轮PL+PS设计、确认实际通道和接口后进行。
+A另交与当前已加载bit同次生成的HWH，传到本目录hardware/current.hwh；不是旧inherited夹具。
+本包不负责加载bit；没有这份HWH和匹配设计时，先停在第五节，不能拿旧文件代替。
+下列所有命令都不传--horizontal-motion，首次不使能舵机。
+
+1. 拒绝BIST：
+sudo /usr/bin/env XILINX_XRT=/usr "$ss_py" software/ps/run_smp.py --hwh hardware/current.hwh --output results/bist-reject.jsonl --mode bist-reject
+预期：两进程PID及host_affinity=[0]、worker_affinity=[1]；保存1帧并退出。
+结果direction_valid=0、reason=3，不发动作。
+2. 确认已有槽处理完、历史故障仅是本次正常STOP的0x40后，运行通过BIST：
+sudo /usr/bin/env XILINX_XRT=/usr "$ss_py" software/ps/run_smp.py --hwh hardware/current.hwh --output results/bist-pass.jsonl --mode bist-pass --clear-faults 0x40
+预期：direction_valid=1、angle_q8=0、servo_cmd_valid=0，仍不动作。
+3. 按同样清错前提，首次只取10帧真实输入：
+sudo /usr/bin/env XILINX_XRT=/usr "$ss_py" software/ps/run_smp.py --hwh hardware/current.hwh --output results/real.jsonl --mode real --frames 10 --clear-faults 0x40
+结果每帧包含原始30字、计算结果、取数/求解耗时，结束记录包含max_service_ns。
+10.667ms是采样步进，不是已经测得的软件耗时；丢帧/故障如实保留，不加大超时凑通过。
+
+若出现其它历史故障，先保记录并查原因，不要改为0xfff清光，也不要反复启动。
+默认只有一个worker拥有快照/动作；其它MMIO程序应已退出。程序不阻止绕过它的外部工具。
+后续新测试批次选新输出目录/文件，不把冷复位后重新开始的帧号误当成同一批记录。
+
+七、中断、故障和恢复
+Ctrl+C会请求STOP并保留未消费帧。若SSCOM没有Ctrl+C发送功能，使用终端对应控制键功能；
+不要把“断开串口”等同于程序已退出。无响应时先报告A/C，不直接复位或重新下载PL。
+保持原设计、时钟和缓存，用同一个HWH保存剩余帧：
+sudo /usr/bin/env XILINX_XRT=/usr "$ss_py" software/ps/run_smp.py --hwh hardware/current.hwh --output results/recovery.jsonl --drain-existing
+恢复不启动新采集、不重发动作。落盘但未消费的帧可能重复保存，按同一PL运行期间帧号关联。
+没有真实板测日志，ARM、BIST、真实采集和STOP/恢复均保持NOT_RUN；不能因文件传完就称通过。
+
+八、回传什么
+SSCOM完整环境/编译/运行日志；results/ARM-RESULT.json；两份BIST JSONL、real.jsonl及有则recovery.jsonl。
+本地保留原件。C核软件/保存/进程问题，B核数值，A核实际bit/HWH、PL与现场。

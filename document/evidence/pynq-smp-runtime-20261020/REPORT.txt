@@ -51,3 +51,25 @@ SMP测试使用假MMIO/假求解器。CPU affinity用注入OS函数检查，未�
 给A：software/ps/run_smp.py及运行说明.txt；提供同一次bit/HWH、目标启动环境和标定。
 给B：现有Solver与PR #15的PC对照兼容；目标ARM运行后回ARM-RESULT.json。
 以上属于C自测和接收记录，不是A/B批准、GitHub Approve或整机验收。
+
+2026-10-20补充：SSCOM离线交付
+新增software/ps/串口部署.txt、package_serial.py、copy_serial_step.ps1，
+固定交付release/output/soundsight-pynq-serial.zip，沿PR #16累计更新。
+ZIP含PC复制助手/步骤/短命令和可恢复原始相对目录的payload.tar.gz。
+B测试仍取PR #15准确Git对象；没有复制第二份活动算法或引入旧仓库路径。
+当前payload 58390字节；45条命令，最长2113 ASCII字节，均小于原方式3800字节限制。
+每块独立写文件，允许重发；拼接只读本包声明块数，重建前清本轮暂存tar，
+长度/gzip检查失败不解包，已有目标目录不覆盖。源码/共享库编译后再BIST，首次不动作。
+
+实际检查：python -E -s -B -X utf8 software/tests/test_serial_package.py
+Ran 10 tests / OK，未跳过。
+在Windows本机用Git Bash实际执行全部生成命令：原始字节恢复和解包一致；
+重发同块无重复；缺块、损坏、旧合法暂存包不能误解包；已有目录保留。
+Windows PowerShell的-NoClipboard模式实际解析并返回指定命令，未改剪贴板。
+另外检查归档运行依赖、无硬件/二进制占位、命令ASCII/长度和ZIP说明。
+早期检查暴露Windows长命令行/PowerShell非ASCII注释兼容问题，已改stdin测试/ASCII助手；
+缺块错误分支和旧暂存风险已按上述规则修正后复验通过，未留下失败工程副本。
+
+此补充未连接COM、未实测大包UART、未启动板卡或动作。目标ARM运行和硬件缺口不变。
+运行步骤已包含环境、编译、157组对照、双BIST、10帧真实采集及STOP/恢复。
+重建包/测试仅使用临时目录，自动清理；必要小结归本报告，固定ZIP是本批有效交付。

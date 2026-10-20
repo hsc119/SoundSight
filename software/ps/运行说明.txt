@@ -1,5 +1,8 @@
 无STM32实验版软件使用说明
 
+按此前SSCOM离线传输的逐步操作见同目录“串口部署.txt”。
+可直接下载的固定包在release/output/soundsight-pynq-serial.zip；重建入口package_serial.py。
+
 PC复现（本工程目录）：
 python -E -s -B -X utf8 software/tests/test_software.py
 python -E -s -B -X utf8 software/tests/test_application.py
